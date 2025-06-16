@@ -1,0 +1,18 @@
+fileFormatVersion: 2
+guid: 510eddbb904e845da8a962ef5d45c6ab
+MonoImporter:
+  externalObjects: {}
+  serializedVersion: 2
+  defaultReferences: []
+  executionOrder: 0
+  icon: {instanceID: 0}
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 294644
+  packageName: Vector Visualizer
+  packageVersion: 1.0
+  assetPath: Assets/VectorVisualizer/Scripts/Demo/VectorVisualizerTester.cs
+  uploadId: 688460

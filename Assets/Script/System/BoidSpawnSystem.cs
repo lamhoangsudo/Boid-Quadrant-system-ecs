@@ -10,7 +10,7 @@ partial struct BoidSpawnSystem : ISystem
     [BurstCompile]
     public void OnCreate(ref SystemState state)
     {
-
+        state.RequireForUpdate<BoidSpawn>();
     }
 
     [BurstCompile]
@@ -21,9 +21,10 @@ partial struct BoidSpawnSystem : ISystem
             EntityCommandBuffer entityCommandBuffer = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>().CreateCommandBuffer(state.WorldUnmanaged);
             foreach (RefRW<BoidSpawn> boidSpawn in SystemAPI.Query<RefRW<BoidSpawn>>())
             {
+                Boid boid = SystemAPI.GetComponent<Boid>(boidSpawn.ValueRO.boidEntity);
                 for (int i = 0; i < boidSpawn.ValueRO.boidCount; i++)
                 {
-                    SpawnBoid(entityCommandBuffer, boidSpawn, false);
+                    SpawnBoid(entityCommandBuffer, boidSpawn, false, boid);
                 }
             }
         }
@@ -32,51 +33,30 @@ partial struct BoidSpawnSystem : ISystem
             EntityCommandBuffer entityCommandBuffer = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>().CreateCommandBuffer(state.WorldUnmanaged);
             foreach (RefRW<BoidSpawn> boidSpawn in SystemAPI.Query<RefRW<BoidSpawn>>())
             {
+                Boid boid = SystemAPI.GetComponent<Boid>(boidSpawn.ValueRO.boidEntity);
                 for (int i = 0; i < boidSpawn.ValueRO.boidLeaderCount; i++)
                 {
-                    SpawnBoid(entityCommandBuffer, boidSpawn, true);
+                    SpawnBoid(entityCommandBuffer, boidSpawn, true, boid);
                 }
             }
         }
     }
 
-    private void SpawnBoid(EntityCommandBuffer entityCommandBuffer, RefRW<BoidSpawn> boidSpawn, bool leader)
+    private void SpawnBoid(EntityCommandBuffer entityCommandBuffer, RefRW<BoidSpawn> boidSpawn, bool leader, Boid boidComponent)
     {
         // Generate a random spawn position within the specified radius
-        float3 spawnPosition = new();
+        
         Unity.Mathematics.Random random = boidSpawn.ValueRO.random;
-        spawnPosition.x = random.NextFloat(-boidSpawn.ValueRO.spawnRadius, boidSpawn.ValueRO.spawnRadius);
-        spawnPosition.y = random.NextFloat(-boidSpawn.ValueRO.spawnRadius, boidSpawn.ValueRO.spawnRadius);
-        spawnPosition.z = random.NextFloat(-boidSpawn.ValueRO.spawnRadius, boidSpawn.ValueRO.spawnRadius);
-        // Generate random parameters for the boid
-        float speed = random.NextFloat(5f, 10f); // Random speed between 5 and 10
-        float rotationSpeed = random.NextFloat(1f, 5f); // Random rotation speed between 1 and 5
-        float orbitDistance = random.NextFloat(2f, 4f); // Random orbit distance between 2 and 4
-        float targetAttractionWeight = random.NextFloat(0.5f, 1f); // Random target attraction weight between 0.1 and 1
-        float alignmentWeight;
-        float cohesionWeight;
-        float separationWeight;
-        float neighborDistance;
-        float separationDistance;
-        if (leader)
-        {
-            alignmentWeight = random.NextFloat(1f, 2f); // Random alignment weight between 1 and 2
-            cohesionWeight = random.NextFloat(0.5f, 1.5f); // Random cohesion weight between 0.5 and 1.5
-            separationWeight = random.NextFloat(1.5f, 3f); // Random separation weight between 1.5 and 3
-            neighborDistance = random.NextFloat(4f, 5f); // Random neighbor distance between 4 and 5
-            separationDistance = random.NextFloat(1.5f, 3f); // Random separation distance between 1.5 and 3
-        }
-        else
-        {
-            alignmentWeight = random.NextFloat(1.5f, 2f); // Random alignment weight between 1.5 and 2
-            cohesionWeight = random.NextFloat(1f, 1.5f); // Random cohesion weight between 1 and 1.5
-            separationWeight = random.NextFloat(1f, 1.5f); // Random separation weight between 1 and 1.5
-            neighborDistance = random.NextFloat(4f, 5f); // Random neighbor distance between 5 and 10
-            separationDistance = random.NextFloat(1f, 1.5f); // Random separation distance between 1.5 and 3
-        }
-
-        float changeTargetTimeMax = random.NextFloat(1f, 3f); // Random change target time max between 1 and 3
-        float3 targetPosition = new(random.NextFloat(-boidSpawn.ValueRO.spawnRadius, boidSpawn.ValueRO.spawnRadius), random.NextFloat(-boidSpawn.ValueRO.spawnRadius, boidSpawn.ValueRO.spawnRadius), random.NextFloat(-boidSpawn.ValueRO.spawnRadius, boidSpawn.ValueRO.spawnRadius));
+        float3 spawnPosition = new(
+            random.NextFloat(-boidSpawn.ValueRO.spawnRadius, boidSpawn.ValueRO.spawnRadius), 
+            random.NextFloat(-boidSpawn.ValueRO.spawnRadius, boidSpawn.ValueRO.spawnRadius), 
+            random.NextFloat(-boidSpawn.ValueRO.spawnRadius, boidSpawn.ValueRO.spawnRadius)
+            );
+        float3 targetPosition = new(
+            random.NextFloat(-boidSpawn.ValueRO.spawnRadius, boidSpawn.ValueRO.spawnRadius), 
+            random.NextFloat(-boidSpawn.ValueRO.spawnRadius, boidSpawn.ValueRO.spawnRadius), 
+            random.NextFloat(-boidSpawn.ValueRO.spawnRadius, boidSpawn.ValueRO.spawnRadius)
+            );
         boidSpawn.ValueRW.random = random;
         // Create the boid entity with the specified parameters
         Entity boidEntity;
@@ -92,20 +72,20 @@ partial struct BoidSpawnSystem : ISystem
         entityCommandBuffer.SetComponent<LocalTransform>(boidEntity, LocalTransform.FromPosition(spawnPosition));
         entityCommandBuffer.SetComponent<Boid>(boidEntity, new Boid
         {
-            speed = speed,
-            rotationSpeed = rotationSpeed,
-            orbitDistance = orbitDistance,
-            targetAttractionWeight = targetAttractionWeight,
-            alignmentWeight = 2f,
-            cohesionWeight = 1.5f,
-            separationWeight = separationWeight,
-            neighborDistance = neighborDistance,
-            separationDistance = separationDistance,
+            speed = boidComponent.speed,
+            rotationSpeed = boidComponent.rotationSpeed,
+            orbitDistance = boidComponent.orbitDistance,
+            targetAttractionWeight = boidComponent.targetAttractionWeight,
+            alignmentWeight = boidComponent.alignmentWeight,
+            cohesionWeight = boidComponent.cohesionWeight,
+            separationWeight = boidComponent.separationWeight,
+            neighborDistance = boidComponent.neighborDistance,
+            separationDistance = boidComponent.separationDistance,
             isBoidLeader = leader,
             targetPosition = targetPosition,
             random = new((uint)boidEntity.Index),
-            changeTargetTimeMax = changeTargetTimeMax,
-            changeTargetTime = changeTargetTimeMax,
+            changeTargetTimeMax = boidComponent.changeTargetTimeMax,
+            changeTargetTime = boidComponent.changeTargetTimeMax,
         });
     }
 

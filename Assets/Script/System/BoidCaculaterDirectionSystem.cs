@@ -3,9 +3,6 @@ using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Transforms;
-using static UnityEditor.Searcher.SearcherWindow;
-using UnityEngine.UIElements;
-using Unity.VisualScripting;
 [UpdateBefore(typeof(BoidHashing))]
 partial struct BoidCaculaterDirectionSystem : ISystem
 {
@@ -20,6 +17,7 @@ partial struct BoidCaculaterDirectionSystem : ISystem
     public void OnUpdate(ref SystemState state)
     {
         BoidHashing boidHashing = SystemAPI.GetSingleton<BoidHashing>();
+        /*
         foreach ((RefRO<LocalTransform> localTransform, RefRW<Boid> boid, Entity currentBoidEntity) in SystemAPI.Query<RefRO<LocalTransform>, RefRW<Boid>>().WithEntityAccess())
         {
             int neighborCount = 0;
@@ -38,12 +36,12 @@ partial struct BoidCaculaterDirectionSystem : ISystem
                         if (distance <= boid.ValueRO.neighborDistance && distance > 0)
                         {
                             float3 neighborDirection = neighborTransform.ValueRO.Forward();
-                            alignment += neighborDirection * boid.ValueRO.alignmentWeight;
-                            cohesion += neighborPosition * boid.ValueRO.cohesionWeight;
+                            alignment += neighborDirection;
+                            cohesion += neighborPosition;
                             if (distance < boid.ValueRO.separationDistance)
                             {
                                 float3 separationDirection = (localTransform.ValueRO.Position - neighborPosition) / distance;
-                                separation += separationDirection * boid.ValueRO.separationWeight;
+                                separation += separationDirection;
                             }
                             neighborCount++;
                         }
@@ -53,20 +51,86 @@ partial struct BoidCaculaterDirectionSystem : ISystem
             float3 finalDir = float3.zero;
             if (neighborCount > 0)
             {
-                alignment = math.normalizesafe(alignment / neighborCount) * boid.ValueRO.alignmentWeight;
+                alignment = math.normalizesafe(alignment) * boid.ValueRO.alignmentWeight;
                 cohesion = math.normalizesafe((cohesion / neighborCount - localTransform.ValueRO.Position)) * boid.ValueRO.cohesionWeight;
                 separation = math.normalizesafe(separation) * boid.ValueRO.separationWeight;
                 float3 desired = alignment + cohesion + separation;
-                finalDir = math.normalizesafe(math.lerp(finalDir, desired, SystemAPI.Time.DeltaTime * boid.ValueRO.rotationSpeed));
+                finalDir = math.normalizesafe(math.lerp(finalDir, desired, boid.ValueRO.smoothFactor * SystemAPI.Time.DeltaTime));
             }
+            boid.ValueRW.alignment = alignment;
+            boid.ValueRW.cohesion = cohesion;
+            boid.ValueRW.separation = separation;
             boid.ValueRW.direction = finalDir;
-        }
+            */
+        BoidCaculaterDirectionJob boidCaculaterDirectionJob = new BoidCaculaterDirectionJob
+        {
+            neighborOffsets = neighborOffsets,
+            cellSize = boidHashing.cellSize,
+            deltaTime = SystemAPI.Time.DeltaTime,
+            mapBoid = boidHashing.mapBoid,
+            neighborTransformLookUp = SystemAPI.GetComponentLookup<LocalTransform>(isReadOnly: true)
+        };
+        boidCaculaterDirectionJob.ScheduleParallel();
     }
+
 
     [BurstCompile]
     public void OnDestroy(ref SystemState state)
     {
         neighborOffsets.Dispose();
+    }
+    [BurstCompile]
+    public partial struct BoidCaculaterDirectionJob : IJobEntity
+    {
+        [ReadOnly] public NativeArray<int3> neighborOffsets;
+        public float cellSize;
+        public float deltaTime;
+        [ReadOnly] public NativeParallelMultiHashMap<int3, Entity> mapBoid;
+        [ReadOnly] public ComponentLookup<LocalTransform> neighborTransformLookUp;
+        public void Execute(in LocalTransform localTransform, ref Boid boid, Entity currentBoidEntity)
+        {
+            int neighborCount = 0;
+            float3 alignment = float3.zero, cohesion = float3.zero, separation = float3.zero;
+            for (int i = 0; i < neighborOffsets.Length; i++)
+            {
+                int3 cellBoidCurrentPosition = (int3)math.floor(localTransform.Position / cellSize) + neighborOffsets[i];
+                if (mapBoid.TryGetFirstValue(cellBoidCurrentPosition, out Entity neighborEntity, out NativeParallelMultiHashMapIterator<int3> iterator))
+                {
+                    do
+                    {
+                        if (neighborEntity == currentBoidEntity) continue;
+                        RefRO<LocalTransform> neighborTransform = neighborTransformLookUp.GetRefRO(neighborEntity);
+                        float3 neighborPosition = neighborTransform.ValueRO.Position;
+                        float distance = math.distance(localTransform.Position, neighborPosition);
+                        if (distance <= boid.neighborDistance && distance > 0)
+                        {
+                            float3 neighborDirection = neighborTransform.ValueRO.Forward();
+                            alignment += neighborDirection;
+                            cohesion += neighborPosition;
+                            if (distance < boid.separationDistance)
+                            {
+                                float3 separationDirection = (localTransform.Position - neighborPosition) / distance;
+                                separation += separationDirection;
+                            }
+                            neighborCount++;
+                        }
+                    } while (mapBoid.TryGetNextValue(out neighborEntity, ref iterator));
+                }
+            }
+            float3 finalDir = float3.zero;
+            if (neighborCount > 0)
+            {
+                alignment = math.normalizesafe(alignment) * boid.alignmentWeight;
+                cohesion = math.normalizesafe((cohesion / neighborCount - localTransform.Position)) * boid.cohesionWeight;
+                separation = math.normalizesafe(separation) * boid.separationWeight;
+                float3 desired = alignment + cohesion + separation;
+                finalDir = math.normalizesafe(math.lerp(finalDir, desired, boid.smoothFactor * deltaTime));
+            }
+            boid.alignment = alignment;
+            boid.cohesion = cohesion;
+            boid.separation = separation;
+            boid.direction = finalDir;
+        }
     }
     private void GetNeighborOffSet()
     {

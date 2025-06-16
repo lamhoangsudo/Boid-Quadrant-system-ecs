@@ -26,14 +26,21 @@ partial struct BoidHashingSystem : ISystem
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
-        EntityCommandBuffer ecb = SystemAPI.GetSingleton<EndSimulationEntityCommandBufferSystem.Singleton>().CreateCommandBuffer(state.WorldUnmanaged);
         RefRW<BoidHashing> boidHashing = SystemAPI.GetComponentRW<BoidHashing>(boidHashingEntity);
         boidHashing.ValueRW.mapBoid.Clear();
+        /*
         foreach ((RefRO<LocalTransform> localTransform, RefRO<Boid> boid, Entity boidEnity) in SystemAPI.Query<RefRO<LocalTransform>, RefRO<Boid>>().WithEntityAccess())
         {
             int3 cellPosition = (int3)math.floor(localTransform.ValueRO.Position / boidHashing.ValueRW.cellSize);
             boidHashing.ValueRW.mapBoid.Add(cellPosition, boidEnity);
         }
+        */
+        BoidHashingJob boidHashingJob = new BoidHashingJob
+        {
+            mapBoid = boidHashing.ValueRW.mapBoid.AsParallelWriter(),
+            cellSize = boidHashing.ValueRW.cellSize
+        };
+        boidHashingJob.ScheduleParallel();
     }
 
     [BurstCompile]
@@ -44,6 +51,17 @@ partial struct BoidHashingSystem : ISystem
             BoidHashing boidHashing = SystemAPI.GetSingleton<BoidHashing>();
             boidHashing.mapBoid.Dispose();
             state.EntityManager.DestroyEntity(SystemAPI.GetSingletonEntity<BoidHashing>());
+        }
+    }
+    [BurstCompile]
+    public partial struct BoidHashingJob : IJobEntity
+    {
+        public NativeParallelMultiHashMap<int3, Entity>.ParallelWriter mapBoid;
+        public float cellSize;
+        public void Execute(in LocalTransform localTransform, in Boid boid, in Entity boidEntity)
+        {
+            int3 cellPosition = (int3)math.floor(localTransform.Position / cellSize);
+            mapBoid.Add(cellPosition, boidEntity);
         }
     }
 }
