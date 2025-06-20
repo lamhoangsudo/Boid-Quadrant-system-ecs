@@ -3,7 +3,7 @@ using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Transforms;
-[UpdateBefore(typeof(BoidHashing))]
+[UpdateBefore(typeof(BoidHashingSystem))]
 partial struct BoidCaculaterDirectionSystem : ISystem
 {
     private NativeArray<int3> neighborOffsets;
@@ -16,7 +16,7 @@ partial struct BoidCaculaterDirectionSystem : ISystem
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
-        BoidHashing boidHashing = SystemAPI.GetSingleton<BoidHashing>();
+        BoidHashingSystem.BoidHashing boidHashing = SystemAPI.GetSingleton<BoidHashingSystem.BoidHashing>();
         /*
         foreach ((RefRO<LocalTransform> localTransform, RefRW<Boid> boid, Entity currentBoidEntity) in SystemAPI.Query<RefRO<LocalTransform>, RefRW<Boid>>().WithEntityAccess())
         {
@@ -89,6 +89,9 @@ partial struct BoidCaculaterDirectionSystem : ISystem
         [ReadOnly] public ComponentLookup<LocalTransform> neighborTransformLookUp;
         public void Execute(in LocalTransform localTransform, ref Boid boid, Entity currentBoidEntity)
         {
+            boid.changeDirectionTime -= deltaTime;
+            if (boid.changeDirectionTime > 0) return;
+            boid.changeDirectionTime = boid.changeDirectionTimeMax;
             int neighborCount = 0;
             float3 alignment = float3.zero, cohesion = float3.zero, separation = float3.zero;
             for (int i = 0; i < neighborOffsets.Length; i++)

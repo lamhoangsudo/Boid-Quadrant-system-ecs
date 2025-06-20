@@ -143,6 +143,7 @@ MonoBehaviour:
   targetAttractionWeight: 1
   smoothFactor: 0.8
   changeTargetTimeMax: 1
+  changeDirectionTimeMax: 1
   isBoidLeader: 0
 --- !u!114 &459791114974606917
 MonoBehaviour:

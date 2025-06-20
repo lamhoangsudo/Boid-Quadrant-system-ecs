@@ -19,6 +19,7 @@ public class BoidAuthoring : MonoBehaviour
     [SerializeField] private float smoothFactor;
 
     [SerializeField] private float changeTargetTimeMax;
+    [SerializeField] private float changeDirectionTimeMax;
     [SerializeField] private bool isBoidLeader = false;
     public class BoidAuthoringBaker : Baker<BoidAuthoring>
     {
@@ -38,6 +39,8 @@ public class BoidAuthoring : MonoBehaviour
                 separationDistance = authoring.separationDistance,
                 changeTargetTimeMax = authoring.changeTargetTimeMax,
                 changeTargetTime = authoring.changeTargetTimeMax,
+                changeDirectionTimeMax = authoring.changeDirectionTimeMax,
+                changeDirectionTime = authoring.changeDirectionTimeMax,
                 smoothFactor = authoring.smoothFactor,
                 random = new((uint)entity.Index),
                 isBoidLeader = authoring.isBoidLeader,
@@ -52,7 +55,8 @@ public struct Boid : IComponentData
     public float3 alignment;
     public float3 cohesion;
     public float3 separation;
-    
+    public int3 cellPosition;
+
     public float neighborDistance;
     public float separationDistance;
 
@@ -68,6 +72,8 @@ public struct Boid : IComponentData
 
     public float changeTargetTime;
     public float changeTargetTimeMax;
+    public float changeDirectionTime;
+    public float changeDirectionTimeMax;
     public Unity.Mathematics.Random random;
     public bool isBoidLeader;
 }

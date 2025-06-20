@@ -1,15 +1,17 @@
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
+using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Transforms;
-public struct BoidHashing : IComponentData
-{
-    public NativeParallelMultiHashMap<int3, Entity> mapBoid;
-    public float cellSize;
-}
+[UpdateBefore(typeof(BoidCellMapUpdateSystem))]
 partial struct BoidHashingSystem : ISystem
 {
+    public struct BoidHashing : IComponentData
+    {
+        public NativeParallelMultiHashMap<int3, Entity> mapBoid;
+        public float cellSize;
+    }
     private Entity boidHashingEntity;
     [BurstCompile]
     public void OnCreate(ref SystemState state)
@@ -41,6 +43,7 @@ partial struct BoidHashingSystem : ISystem
             cellSize = boidHashing.ValueRW.cellSize
         };
         boidHashingJob.ScheduleParallel();
+        state.Dependency.Complete(); // Ensure the job completes before proceeding
     }
 
     [BurstCompile]
@@ -58,10 +61,11 @@ partial struct BoidHashingSystem : ISystem
     {
         public NativeParallelMultiHashMap<int3, Entity>.ParallelWriter mapBoid;
         public float cellSize;
-        public void Execute(in LocalTransform localTransform, in Boid boid, in Entity boidEntity)
+        public void Execute(in LocalTransform localTransform, ref Boid boid, in Entity boidEntity)
         {
-            int3 cellPosition = (int3)math.floor(localTransform.Position / cellSize);
-            mapBoid.Add(cellPosition, boidEntity);
+            int3 cellPosition = (int3)math.floor(localTransform.Position / cellSize); // Calculate the cell position based on the boid's position and cell size
+            boid.cellPosition = cellPosition; // Update the cell position in the Boid component
+            mapBoid.Add(cellPosition, boidEntity);// Add the boid entity to the map using the calculated cell position
         }
     }
 }
