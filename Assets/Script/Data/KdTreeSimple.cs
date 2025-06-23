@@ -65,7 +65,8 @@ public struct KdTreeSimple
     {
         if (nodes.IsCreated)
         {
-            nodes.Dispose();
+            nodes.Clear(); // Clear the nodes list
+            nodes.Dispose(); // Dispose of the nodes list
         }
     }
     public NativeArray<KdTreeNode> GetNodes(Allocator allocator)

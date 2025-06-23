@@ -4,22 +4,38 @@ using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Transforms;
+using static Enum;
 
 [UpdateAfter(typeof(BoidHashingSystem))]
 partial struct BoidCellMapUpdateSystem : ISystem
 {
     private const float allowedChangeCount = 4f;
-    private Entity boidCellMapEntity;
+    private Entity boidKdTreeSimpleCellMapEntity;
+    private Entity boidKdTreeIncrementalCellMapEntity;
+    private Entity boidKdTreeBalancedCellMapEntity;
+    public struct KdTreeSimpleTag : IComponentData
+    {
+        public int length; // Length of the KD-Tree nodes array, can be used for debugging or other purposes
+    }
+    public struct KdTreeIncrementalTag : IComponentData
+    {
+        public int length; // Length of the KD-Tree nodes array, can be used for debugging or other purposes
+    }
+    public struct KdTreeBalancedTag : IComponentData
+    {
+        public int length; // Length of the KD-Tree nodes array, can be used for debugging or other purposes
+    }
     public struct BoidCellMapUpdate : IComponentData
     {
         public NativeHashMap<int3, CellDataMap> mapCellDatas;
+        public Enum.KDTreeType kdTreeType;
     }
     public struct CellDataMap
     {
-        public NativeArray<float3> boidPositions;
+        public NativeArray<float3> boidPositions; // Positions of boids in the cell
+        public NativeArray<KdTreeNode> nodes; // Nodes for KD-Tree
         public int curentBoidCount;
         public int lastBoidCount;
-        public Enum.KDTreeType kdTreeType;
         public bool hasKDTree;
     }
     private NativeParallelMultiHashMap<int3, Entity> mapBoid;
@@ -27,101 +43,145 @@ partial struct BoidCellMapUpdateSystem : ISystem
     public void OnCreate(ref SystemState state)
     {
         state.RequireForUpdate<BoidHashingSystem.BoidHashing>();
-        boidCellMapEntity = state.EntityManager.CreateEntity();
-        state.EntityManager.AddComponentData(boidCellMapEntity, new BoidCellMapUpdate
+        boidKdTreeSimpleCellMapEntity = state.EntityManager.CreateEntity();
+        boidKdTreeIncrementalCellMapEntity = state.EntityManager.CreateEntity();
+        boidKdTreeBalancedCellMapEntity = state.EntityManager.CreateEntity();
+        state.EntityManager.AddComponentData(boidKdTreeSimpleCellMapEntity, new BoidCellMapUpdate
         {
-            mapCellDatas = new NativeHashMap<int3, CellDataMap>(10000, Allocator.Persistent)
+            mapCellDatas = new NativeHashMap<int3, CellDataMap>(10000, Allocator.Persistent),
+            kdTreeType = Enum.KDTreeType.Simple
         });
-        state.EntityManager.SetName(boidCellMapEntity, "BoidCellMapUpdate");
+        state.EntityManager.AddComponent<KdTreeSimpleTag>(boidKdTreeSimpleCellMapEntity);
+        state.EntityManager.AddComponentData(boidKdTreeIncrementalCellMapEntity, new BoidCellMapUpdate
+        {
+            mapCellDatas = new NativeHashMap<int3, CellDataMap>(10000, Allocator.Persistent),
+            kdTreeType = Enum.KDTreeType.Incremental
+        });
+        state.EntityManager.AddComponent<KdTreeIncrementalTag>(boidKdTreeIncrementalCellMapEntity);
+        state.EntityManager.AddComponentData(boidKdTreeBalancedCellMapEntity, new BoidCellMapUpdate
+        {
+            mapCellDatas = new NativeHashMap<int3, CellDataMap>(10000, Allocator.Persistent),
+            kdTreeType = Enum.KDTreeType.Balanced
+        });
+        state.EntityManager.AddComponent<KdTreeBalancedTag>(boidKdTreeBalancedCellMapEntity);
+        state.EntityManager.SetName(boidKdTreeSimpleCellMapEntity, "boidKdTreeSimpleCellMapEntity");
+        state.EntityManager.SetName(boidKdTreeIncrementalCellMapEntity, "boidKdTreeIncrementalCellMapEntity");
+        state.EntityManager.SetName(boidKdTreeBalancedCellMapEntity, "boidKdTreeBalancedCellMapEntity");
         mapBoid = new(10000, Allocator.Persistent);
     }
 
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
-        // Ensure that BoidHashingSystem has run before this system
-        RefRW<BoidCellMapUpdate> boidCellMapUpdate = SystemAPI.GetComponentRW<BoidCellMapUpdate>(boidCellMapEntity);
-        // Clear the mapCellDatas for the next update
-        boidCellMapUpdate.ValueRW.mapCellDatas.Clear();
+        // Initialize the mapCellDatas for the next update
         NativeArray<int3> keyArray = SystemAPI.GetSingleton<BoidHashingSystem.BoidHashing>().mapBoid.GetKeyArray(Allocator.Temp);
         NativeList<float3> allBoidPositionsInCell = new(Allocator.Temp);
-        // Iterate through each key in the mapBoid and collect boid positions
-        foreach (int3 key in keyArray)
+        foreach (RefRW<BoidCellMapUpdate> boidCellMapUpdate in SystemAPI.Query<RefRW<BoidCellMapUpdate>>())
         {
-            // Initialize the list for this cell
-            allBoidPositionsInCell.Clear();
-            // Get all boid entities in the current cell
-            foreach (Entity boidEntity in SystemAPI.GetSingleton<BoidHashingSystem.BoidHashing>().mapBoid.GetValuesForKey(key))
-            {
-                RefRO<LocalTransform> boidLocalTransform = SystemAPI.GetComponentRO<LocalTransform>(boidEntity);
-                float3 boidPosition = boidLocalTransform.ValueRO.Position;
-                allBoidPositionsInCell.Add(boidPosition);
-            }
-            // Create a NativeArray from the collected positions
-            NativeArray<float3> allBoidPositionsInCellArray = new(allBoidPositionsInCell.Length, Allocator.Persistent);
-            NativeArray<float3>.Copy(allBoidPositionsInCell.AsArray(), allBoidPositionsInCellArray);
-            // Determine the KDTreeType based on the current and last boid counts
-            Enum.KDTreeType kdTreeType = Enum.KDTreeType.None;
+            // Initialize the mapCellDatas for the next update
+            Enum.KDTreeType newKdTreeType = Enum.KDTreeType.None;
             int currentBoidCount = 0;
             int lastBoidCount = 0;
-            if (boidCellMapUpdate.ValueRO.mapCellDatas.ContainsKey(key))
+            foreach (int3 key in keyArray)
             {
-                // If the cell already exists, retrieve the current and last boid counts
-                currentBoidCount = allBoidPositionsInCellArray.Length;
-                lastBoidCount = boidCellMapUpdate.ValueRO.mapCellDatas[key].curentBoidCount;
-                // Determine the KDTreeType based on the change in boid count
-                float deltaCount = (float)math.abs(currentBoidCount - lastBoidCount);
-                float deltaCountPercent = deltaCount / math.max(1, lastBoidCount);
-                if(deltaCountPercent <= 0.01f)
+                // Get all boid entities in the current cell
+                foreach (Entity boidEntity in SystemAPI.GetSingleton<BoidHashingSystem.BoidHashing>().mapBoid.GetValuesForKey(key))
                 {
-                    kdTreeType = Enum.KDTreeType.Simple;
+                    RefRO<LocalTransform> boidLocalTransform = SystemAPI.GetComponentRO<LocalTransform>(boidEntity);
+                    float3 boidPosition = boidLocalTransform.ValueRO.Position;
+                    allBoidPositionsInCell.Add(boidPosition);
                 }
-                else if (deltaCountPercent <= 0.3 && deltaCountPercent > 0.01f && currentBoidCount >= 100f && currentBoidCount <= 300f)
+                // Create a NativeArray from the collected positions
+                NativeArray<float3> allBoidPositionsInCellArray = new(allBoidPositionsInCell.Length, Allocator.Persistent);
+                NativeArray<float3>.Copy(allBoidPositionsInCell.AsArray(), allBoidPositionsInCellArray);
+                // Determine the KDTreeType based on the current and last boid counts
+                if (boidCellMapUpdate.ValueRO.mapCellDatas.ContainsKey(key))
                 {
-                    kdTreeType = Enum.KDTreeType.Incremental;
+                    // If the cell already exists, retrieve the current and last boid counts
+                    currentBoidCount = allBoidPositionsInCellArray.Length;
+                    if (currentBoidCount == 0)
+                    {
+                        boidCellMapUpdate.ValueRW.mapCellDatas.Remove(key); // Remove the cell if no boids are present
+                        continue; // Skip further processing for this key
+                    }
+                    lastBoidCount = boidCellMapUpdate.ValueRO.mapCellDatas[key].curentBoidCount;
+                    float deltaCount = (float)math.abs(currentBoidCount - lastBoidCount);
+                    float deltaCountPercent = deltaCount / math.max(1, lastBoidCount);
+                    // Determine the KDTreeType based on the change in boid count
+                    if (deltaCountPercent <= 0.01f)
+                    {
+                        newKdTreeType = Enum.KDTreeType.Simple;
+                    }
+                    else if (deltaCountPercent <= 0.3 && deltaCountPercent > 0.01f && currentBoidCount >= 100f && currentBoidCount <= 300f)
+                    {
+                        newKdTreeType = Enum.KDTreeType.Incremental;
+                    }
+                    else
+                    {
+                        newKdTreeType = Enum.KDTreeType.Balanced;
+                    }
+                    if (boidCellMapUpdate.ValueRO.kdTreeType != newKdTreeType)
+                    {
+                        boidCellMapUpdate.ValueRW.mapCellDatas.Remove(key); // Remove the old cell data if the KDTreeType has changed
+                    }
+                    else
+                    {
+                        boidCellMapUpdate.ValueRW.mapCellDatas[key] = new CellDataMap
+                        {
+                            boidPositions = allBoidPositionsInCellArray,
+                            curentBoidCount = currentBoidCount,
+                            lastBoidCount = lastBoidCount,
+                            hasKDTree = false // Set to false initially, will be updated later
+                        };
+                    }
                 }
                 else
                 {
-                    kdTreeType = Enum.KDTreeType.Balanced;
+                    // This means the cell is being created for the first time
+                    currentBoidCount = allBoidPositionsInCellArray.Length;
+                    lastBoidCount = 0; // No previous count
+                    // If this is the first time the cell is being created, set the KDTreeType based on the current boid count
+                    if (currentBoidCount < 30)
+                        newKdTreeType = KDTreeType.Simple;
+                    else if (currentBoidCount <= 300)
+                        newKdTreeType = KDTreeType.Incremental;
+                    else
+                        newKdTreeType = KDTreeType.Balanced;
+                    if (newKdTreeType == boidCellMapUpdate.ValueRO.kdTreeType)
+                    {
+                        boidCellMapUpdate.ValueRW.mapCellDatas[key] = new CellDataMap
+                        {
+                            boidPositions = allBoidPositionsInCellArray,
+                            curentBoidCount = currentBoidCount,
+                            lastBoidCount = currentBoidCount,
+                            hasKDTree = false
+                        };
+                    }
                 }
             }
-            else
-            {
-                // If the cell does not exist, set the current and last boid counts to the length of the array
-                currentBoidCount = allBoidPositionsInCellArray.Length;
-                lastBoidCount = allBoidPositionsInCellArray.Length;
-                kdTreeType = Enum.KDTreeType.None; // Default type for new cells
-            }
-            // Create a new CellDataMap and populate it with the boid positions and counts
-            boidCellMapUpdate.ValueRW.mapCellDatas[key] = new CellDataMap
-            {
-                boidPositions = allBoidPositionsInCellArray,
-                curentBoidCount = currentBoidCount,
-                lastBoidCount = lastBoidCount,
-                kdTreeType = kdTreeType,
-                hasKDTree = false
-            };
         }
-        // Dispose of the temporary arrays
-        keyArray.Dispose();
-        allBoidPositionsInCell.Dispose();
+        keyArray.Dispose(); // Dispose of the key array after use
+        allBoidPositionsInCell.Dispose(); // Dispose of the NativeList after use
     }
 
     [BurstCompile]
     public void OnDestroy(ref SystemState state)
     {
-        if (SystemAPI.HasSingleton<BoidCellMapUpdate>())
+        foreach ((RefRW<BoidCellMapUpdate> boidCellMapUpdate, Entity entity) in SystemAPI.Query<RefRW<BoidCellMapUpdate>>().WithEntityAccess())
         {
-            BoidCellMapUpdate boidCellMapUpdate = SystemAPI.GetSingleton<BoidCellMapUpdate>();
-            foreach (KVPair<int3, CellDataMap> cellData in boidCellMapUpdate.mapCellDatas)
+            foreach (KVPair<int3, CellDataMap> cellData in boidCellMapUpdate.ValueRO.mapCellDatas)
             {
                 if (cellData.Value.boidPositions.IsCreated)
                 {
                     cellData.Value.boidPositions.Dispose();
                 }
+                if(cellData.Value.nodes.IsCreated)
+                {
+                    cellData.Value.nodes.Dispose();
+                }
             }
-            boidCellMapUpdate.mapCellDatas.Dispose();
-            state.EntityManager.DestroyEntity(SystemAPI.GetSingletonEntity<BoidCellMapUpdate>());
+            boidCellMapUpdate.ValueRW.mapCellDatas.Dispose();
+            state.EntityManager.DestroyEntity(entity);
         }
     }
 }
