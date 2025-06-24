@@ -1,27 +1,23 @@
-using System.Collections.Generic;
 using Unity.Burst;
-using Unity.Collections;
 using Unity.Entities;
-using Unity.Mathematics;
-using static BoidCellMapUpdateDataSystem;
-[UpdateAfter(typeof(BoidCellMapUpdateDataSystem))]
-partial struct KdTreeUpdateNodeSystem : ISystem
+
+partial struct KdTreeModifielSystem : ISystem
 {
     [BurstCompile]
     public void OnCreate(ref SystemState state)
     {
-
+        
     }
 
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
-
+        
     }
 
     [BurstCompile]
     public void OnDestroy(ref SystemState state)
     {
-
+        
     }
 }

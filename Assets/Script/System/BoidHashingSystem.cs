@@ -4,7 +4,7 @@ using Unity.Entities;
 using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Transforms;
-[UpdateBefore(typeof(BoidCellMapUpdateSystem))]
+[UpdateBefore(typeof(BoidCellMapUpdateDataSystem))]
 partial struct BoidHashingSystem : ISystem
 {
     public struct BoidHashing : IComponentData
