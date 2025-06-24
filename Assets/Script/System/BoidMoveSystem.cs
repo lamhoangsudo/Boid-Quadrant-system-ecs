@@ -94,7 +94,7 @@ partial struct BoidMoveSystem : ISystem
                 {
                     // Thay đổi mục tiêu mới
                     Random random = boid.random;
-                    boid.targetPosition = localTransform.Position + new float3(random.NextFloat(-1f, 1f), random.NextFloat(-1f, 1f), random.NextFloat(-1f, 1f));
+                    boid.targetPosition = new float3(random.NextFloat(-1f, 1f), random.NextFloat(-1f, 1f), random.NextFloat(-1f, 1f));
                     boid.random = random; // Cập nhật lại random để tránh lặp lại cùng một mục tiêu
                     boid.changeTargetTime = boid.changeTargetTimeMax;
                 }

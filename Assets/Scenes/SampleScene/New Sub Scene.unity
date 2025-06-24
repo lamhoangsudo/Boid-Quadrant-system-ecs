@@ -165,7 +165,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   boidPrefab: {fileID: 8402434979245384218, guid: 03dd91ac1b7611142bcf7cb96a48a631, type: 3}
   boidLeaderPrefab: {fileID: 8402434979245384218, guid: 105f9eb911c089845b7bb1349a806ae0, type: 3}
-  boidCount: 100
+  boidCount: 10
   boidLeader: 10
   spawnRadius: 10
 --- !u!1660057539 &9223372036854775807

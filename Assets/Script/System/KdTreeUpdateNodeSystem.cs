@@ -16,6 +16,7 @@ partial struct KdTreeUpdateNodeSystem : ISystem
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
+        state.RequireForUpdate<BoidCellMapUpdate>();
         foreach((RefRO<BoidCellMapUpdate> boidCellMapUpdate, RefRW<KdTreeSimpleTag> kdTreeSimpleTag) in SystemAPI.Query<RefRO<BoidCellMapUpdate>, RefRW<KdTreeSimpleTag>>())
         {
             kdTreeSimpleTag.ValueRW.length = boidCellMapUpdate.ValueRO.mapCellDatas.Count;
