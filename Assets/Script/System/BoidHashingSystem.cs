@@ -1,10 +1,8 @@
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Entities;
-using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Transforms;
-[UpdateBefore(typeof(BoidCellMapUpdateDataSystem))]
 partial struct BoidHashingSystem : ISystem
 {
     public struct BoidHashing : IComponentData

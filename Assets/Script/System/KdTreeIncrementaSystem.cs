@@ -1,0 +1,53 @@
+using Unity.Burst;
+using Unity.Collections;
+using Unity.Entities;
+using Unity.Mathematics;
+using static BoidCellMapDataDivisionSystem;
+using static BoidCellMapUpdateDataSystem;
+
+partial struct KdTreeIncrementaSystem : ISystem
+{
+    private KdTreeTool kdTreeTool;
+    [BurstCompile]
+    public void OnCreate(ref SystemState state)
+    {
+        kdTreeTool = new KdTreeTool();
+    }
+
+    [BurstCompile]
+    public void OnUpdate(ref SystemState state)
+    {
+        foreach ((RefRW<KDTreeMapContainer> KDTreeMapContainer, RefRO<IncrementalKDTreeMap> incrementalKDTreeMap) in SystemAPI.Query<RefRW<KDTreeMapContainer>, RefRO<IncrementalKDTreeMap>>())
+        {
+            NativeHashMap<int3, CellDataMap> mapCellDatas = KDTreeMapContainer.ValueRO.map;
+            if (mapCellDatas.IsEmpty)
+            {
+                return; // If the map is empty, no need to proceed
+            }
+            foreach (KVPair<int3, CellDataMap> mapCellData in mapCellDatas)
+            {
+                // Initialize the KDTree for the cell 
+                if (mapCellData.Value.hasKDTree)
+                {
+                    // If the KDTree already exists, update it with the current boid positions
+                    kdTreeTool.ApplyChanges(mapCellData.Value.currentBoidPositions, mapCellData.Value.previousBoidPositions, Allocator.Temp);
+                }
+                else
+                {
+                    // If the KDTree does not exist, build it from the current boid positions
+                    kdTreeTool.BuildTree(mapCellData.Value.currentBoidPositions, Allocator.Temp);
+                    mapCellData.Value.nodes = kdTreeTool.GetNodes(Allocator.Temp); // Assign the nodes to the cell data
+                    mapCellData.Value.hasKDTree = true; // Mark that the KDTree has been built for this cell
+                }
+                // DisposeNode of the KDTree after use
+                kdTreeTool.DisposeNode();
+            }
+        }
+    }
+
+    [BurstCompile]
+    public void OnDestroy(ref SystemState state)
+    {
+
+    }
+}

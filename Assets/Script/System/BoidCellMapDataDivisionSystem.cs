@@ -10,9 +10,22 @@ partial struct BoidCellMapDataDivisionSystem : ISystem
     private Entity simpleEntity;
     private Entity incrementalEntity;
     private Entity balancedEntity;
+    public struct SimpleKDTreeMap : IComponentData
+    {
+
+    }
+    public struct IncrementalKDTreeMap : IComponentData
+    {
+
+    }
+    public struct BalancedKDTreeMap : IComponentData
+    {
+
+    }
     public struct KDTreeMapContainer : IComponentData
     {
         public NativeHashMap<int3, CellDataMap> map;
+        public int count => map.Count;
     }
 
     [BurstCompile]
@@ -35,6 +48,22 @@ partial struct BoidCellMapDataDivisionSystem : ISystem
         {
             map = new NativeHashMap<int3, CellDataMap>(10000, allocator)
         });
+
+        state.EntityManager.AddComponentData(simpleEntity, new SimpleKDTreeMap
+        {
+
+        });
+        state.EntityManager.AddComponentData(incrementalEntity, new IncrementalKDTreeMap
+        {
+
+        });
+        state.EntityManager.AddComponentData(balancedEntity, new BalancedKDTreeMap
+        {
+
+        });
+        state.EntityManager.SetName(simpleEntity, "SimpleKDTreeMap");
+        state.EntityManager.SetName(incrementalEntity, "IncrementalKDTreeMap");
+        state.EntityManager.SetName(balancedEntity, "BalancedKDTreeMap");
     }
 
     [BurstCompile]

@@ -15,6 +15,7 @@ partial struct BoidCellMapUpdateDataSystem : ISystem
     public struct BoidCellMapUpdateTotal : IComponentData
     {
         public NativeHashMap<int3, CellDataMap> mapCellDatasTotal;
+        public int count => mapCellDatasTotal.Count;
     }
     public struct CellDataMap
     {
@@ -28,23 +29,25 @@ partial struct BoidCellMapUpdateDataSystem : ISystem
     [BurstCompile]
     public void OnCreate(ref SystemState state)
     {
-        state.RequireForUpdate<BoidHashingSystem.BoidHashing>();
         boidCellMapUpdateTotalEntity = state.EntityManager.CreateEntity();
         state.EntityManager.AddComponentData(boidCellMapUpdateTotalEntity, new BoidCellMapUpdateTotal
         {
-            mapCellDatasTotal = new NativeHashMap<int3, CellDataMap>(30000, Allocator.Persistent),
+            mapCellDatasTotal = new NativeHashMap<int3, CellDataMap>(10000, Allocator.Persistent),
         });
+        state.EntityManager.SetName(boidCellMapUpdateTotalEntity, "BoidCellMapUpdateTotal");
     }
 
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
+        state.RequireForUpdate<BoidHashingSystem.BoidHashing>();
         // Initialize the mapCellDatasTotal for the next update
-        NativeArray<int3> keyArray = SystemAPI.GetSingleton<BoidHashingSystem.BoidHashing>().mapBoid.GetKeyArray(Allocator.Temp);
+        NativeParallelMultiHashMap<int3, Entity> mapBoid = SystemAPI.GetSingleton<BoidHashingSystem.BoidHashing>().mapBoid;
+        if (mapBoid.IsEmpty) return;
+        NativeArray<int3> keyArray = mapBoid.GetKeyArray(Allocator.Temp);
         RefRW<BoidCellMapUpdateTotal> boidCellMapUpdateTotal = SystemAPI.GetComponentRW<BoidCellMapUpdateTotal>(boidCellMapUpdateTotalEntity);
         NativeHashMap<int3, CellDataMap> mapCellDatasTotal = boidCellMapUpdateTotal.ValueRO.mapCellDatasTotal;
         NativeHashSet<int3> uniqueKeys = new(keyArray.Length, Allocator.Temp);
-        NativeParallelMultiHashMap<int3, Entity> mapBoid = SystemAPI.GetSingleton<BoidHashingSystem.BoidHashing>().mapBoid;
         foreach (int3 key in keyArray)
         {
             uniqueKeys.Add(key); // Add uniqueKeys to the hash set for quick lookup
@@ -58,11 +61,11 @@ partial struct BoidCellMapUpdateDataSystem : ISystem
                 allCurrentBoidPositionsInCell.Add(boidLocalTransform.ValueRO.Position);
             }
 
-            var currentCount = allCurrentBoidPositionsInCell.Length;
-            var currentArray = new NativeArray<float3>(currentCount, Allocator.Persistent);
+            int currentCount = allCurrentBoidPositionsInCell.Length;
+            NativeArray<float3> currentArray = new(currentCount, Allocator.Persistent);
             NativeArray<float3>.Copy(allCurrentBoidPositionsInCell.AsArray(), currentArray);
 
-            if (mapCellDatasTotal.TryGetValue(key, out var cellData))
+            if (mapCellDatasTotal.TryGetValue(key, out CellDataMap cellData))
             {
                 if (cellData.previousBoidPositions.IsCreated)
                     cellData.previousBoidPositions.Dispose();
@@ -76,7 +79,7 @@ partial struct BoidCellMapUpdateDataSystem : ISystem
             }
             else
             {
-                var newCell = new CellDataMap
+                CellDataMap newCell = new()
                 {
                     currentBoidPositions = currentArray,
                     previousBoidPositions = new NativeArray<float3>(0, Allocator.Persistent),
@@ -90,19 +93,19 @@ partial struct BoidCellMapUpdateDataSystem : ISystem
             allCurrentBoidPositionsInCell.Dispose();
         }
         NativeList<int3> keysToRemove = new(Allocator.Temp);
-        var keys = mapCellDatasTotal.GetKeyArray(Allocator.Temp);
-        foreach (var key in keys)
+        NativeArray<int3> keys = mapCellDatasTotal.GetKeyArray(Allocator.Temp);
+        foreach (int3 key in keys)
         {
             if (!uniqueKeys.Contains(key))
             {
-                var data = mapCellDatasTotal[key];
+                CellDataMap data = mapCellDatasTotal[key];
                 if (data.currentBoidPositions.IsCreated) data.currentBoidPositions.Dispose();
                 if (data.previousBoidPositions.IsCreated) data.previousBoidPositions.Dispose();
                 if (data.nodes.IsCreated) data.nodes.Dispose();
                 keysToRemove.Add(key);
             }
         }
-        foreach (var key in keysToRemove)
+        foreach (int3 key in keysToRemove)
         {
             mapCellDatasTotal.Remove(key);
         }
@@ -111,7 +114,6 @@ partial struct BoidCellMapUpdateDataSystem : ISystem
         keysToRemove.Dispose();
         keyArray.Dispose();
         uniqueKeys.Dispose();
-        mapBoid.Dispose();
     }
 
     [BurstCompile]
@@ -119,12 +121,21 @@ partial struct BoidCellMapUpdateDataSystem : ISystem
     {
         if (SystemAPI.HasComponent<BoidCellMapUpdateTotal>(boidCellMapUpdateTotalEntity))
         {
-            var map = SystemAPI.GetComponent<BoidCellMapUpdateTotal>(boidCellMapUpdateTotalEntity).mapCellDatasTotal;
-            foreach (var kvp in map)
+            NativeHashMap<int3, CellDataMap> map = SystemAPI.GetComponent<BoidCellMapUpdateTotal>(boidCellMapUpdateTotalEntity).mapCellDatasTotal;
+            foreach (KVPair<int3, CellDataMap> kvp in map)
             {
-                if (kvp.Value.currentBoidPositions.IsCreated) kvp.Value.currentBoidPositions.Dispose();
-                if (kvp.Value.previousBoidPositions.IsCreated) kvp.Value.previousBoidPositions.Dispose();
-                if (kvp.Value.nodes.IsCreated) kvp.Value.nodes.Dispose();
+                if (kvp.Value.currentBoidPositions.IsCreated)
+                {
+                    kvp.Value.currentBoidPositions.Dispose();
+                }
+                if (kvp.Value.previousBoidPositions.IsCreated)
+                {
+                    kvp.Value.previousBoidPositions.Dispose();
+                }
+                if (kvp.Value.nodes.IsCreated)
+                {
+                    kvp.Value.nodes.Dispose();
+                }
             }
             map.Dispose();
         }

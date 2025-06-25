@@ -27,7 +27,7 @@ public struct KdTreeTool
         public NativeList<float3> removePosition;
     }
     private NativeList<KdTreeNode> nodes; // List of nodes in the KD-tree
-    private NativeArray<int> indices; // Indices of points in the original array
+    private NativeArray<int> indices; // Indices of previousPoints in the original array
     private NativeList<float3> points; // Points in the KD-tree
     private KdTreeDelta delta; // Delta for changes in the KD-tree
     public void BuildTree(NativeArray<float3> points, Allocator allocator)
@@ -54,7 +54,7 @@ public struct KdTreeTool
     {
         if (indices.Length == 0)
         {
-            return -1; // No points to process
+            return -1; // No previousPoints to process
         }
         int axis = depth % 3; // Cycle through axes (0, 1, 2 for x, y, z)
         AxisComparer comparer = new(axis, points);
@@ -82,8 +82,8 @@ public struct KdTreeTool
     {
         if (points.IsCreated)
         {
-            points.Clear(); // Clear the points array
-            points.Dispose(); // DisposeNode of the points array
+            points.Clear(); // Clear the previousPoints array
+            points.Dispose(); // DisposeNode of the previousPoints array
         }
     }
     public NativeArray<KdTreeNode> GetNodes(Allocator allocator)
@@ -98,8 +98,8 @@ public struct KdTreeTool
             removePosition = new NativeList<float3>(allocator)
         };
         
-        // Find added points
-        foreach (var point in newPoints)
+        // Find added previousPoints
+        foreach (float3 point in newPoints)
         {
             if (!points.Contains(point))
             {
@@ -107,8 +107,8 @@ public struct KdTreeTool
             }
         }
         
-        // Find removed points
-        foreach (var point in points)
+        // Find removed previousPoints
+        foreach (float3 point in points)
         {
             if (!newPoints.Contains(point))
             {
@@ -118,32 +118,130 @@ public struct KdTreeTool
     }
     public void InsertPoint(float3 point)
     {
-        points.Add(point); // Add the new point to the points array
+        points.Add(point); // Add the new point to the previousPoints array
+        InsertIntoTree(point, 0, 0);
+    }
+    private void InsertIntoTree(float3 point, int currentIndex, int depth)
+    {
+        if (nodes.Length == 0)
+        {
+            nodes.Add(new KdTreeNode { position = point, leftChild = -1, rightChild = -1 });
+            return;
+        }
+
+        int axis = depth % 3;
+        KdTreeNode currentNode = nodes[currentIndex];
+
+        if (point[axis] < currentNode.position[axis])
+        {
+            if (currentNode.leftChild == -1)
+            {
+                currentNode.leftChild = nodes.Length;
+                nodes[currentIndex] = currentNode;
+                nodes.Add(new KdTreeNode { position = point, leftChild = -1, rightChild = -1 });
+            }
+            else
+            {
+                InsertIntoTree(point, currentNode.leftChild, depth + 1);
+            }
+        }
+        else
+        {
+            if (currentNode.rightChild == -1)
+            {
+                currentNode.rightChild = nodes.Length;
+                nodes[currentIndex] = currentNode;
+                nodes.Add(new KdTreeNode { position = point, leftChild = -1, rightChild = -1 });
+            }
+            else
+            {
+                InsertIntoTree(point, currentNode.rightChild, depth + 1);
+            }
+        }
     }
     public void RemovePoint(float3 point)
     {
         int index = points.IndexOf(point); // Find the index of the point to remove
         if (index >= 0)
         {
-            points.RemoveAt(index); // Remove the point from the points array
+            points.RemoveAt(index); // Remove the point from the previousPoints array
+            RemoveFromTree(point, 0, 0); // Remove the point from the KD-tree
         }
     }
-    public void ApplyChanges(NativeArray<float3> newPoints, Allocator allocator)
+    private void RemoveFromTree(float3 point, int currentIndex, int depth)
     {
-        DetectChanges(newPoints, allocator); // Detect changes in the KD-tree
-        
-        // Add new points to the KD-tree
-        foreach (var point in delta.addPosition)
-        {
-            InsertPoint(point); // Insert new point into the KD-tree
-        }
-        // Remove points from the KD-tree
-        foreach (var point in delta.removePosition)
-        {
+        if (currentIndex < 0 || currentIndex >= nodes.Length) return;
 
-            RemovePoint(point); // Remove point from the KD-tree
+        int axis = depth % 3;
+        KdTreeNode node = nodes[currentIndex];
+
+        if (math.all(node.position == point))
+        {
+            // Mark as removed (naive approach: replace with rightmost of left subtree)
+            int replacementIndex = FindMax(node.leftChild, axis, depth + 1);
+            if (replacementIndex != -1)
+            {
+                KdTreeNode replacement = nodes[replacementIndex];
+                nodes[currentIndex] = replacement;
+                RemoveFromTree(replacement.position, node.leftChild, depth + 1);
+            }
+            else
+            {
+                nodes[currentIndex] = new KdTreeNode { position = float3.zero, leftChild = -1, rightChild = -1 };
+            }
+            return;
         }
 
-        BuildTree(points.ToArray(allocator), allocator); // Rebuild the KD-tree with updated points
+        if (point[axis] < node.position[axis])
+        {
+            RemoveFromTree(point, node.leftChild, depth + 1);
+        }
+        else
+        {
+            RemoveFromTree(point, node.rightChild, depth + 1);
+        }
+    }
+    private int FindMax(int currentIndex, int axis, int depth)
+    {
+        if (currentIndex == -1) return -1;
+
+        KdTreeNode node = nodes[currentIndex];
+        int nodeAxis = depth % 3;
+
+        if (nodeAxis == axis)
+        {
+            if (node.rightChild == -1) return currentIndex;
+            return FindMax(node.rightChild, axis, depth + 1);
+        }
+
+        int leftMax = FindMax(node.leftChild, axis, depth + 1);
+        int rightMax = FindMax(node.rightChild, axis, depth + 1);
+
+        int maxIndex = currentIndex;
+        if (leftMax != -1 && nodes[leftMax].position[axis] > nodes[maxIndex].position[axis])
+            maxIndex = leftMax;
+        if (rightMax != -1 && nodes[rightMax].position[axis] > nodes[maxIndex].position[axis])
+            maxIndex = rightMax;
+
+        return maxIndex;
+    }
+    public void ApplyChanges(NativeArray<float3> newPoints, NativeArray<float3> previousPoints, Allocator allocator)
+    {
+        foreach (float3 point in previousPoints)
+        {
+            points.Add(point);
+        }
+
+        DetectChanges(newPoints, allocator);
+
+        foreach (float3 point in delta.addPosition)
+        {
+            InsertPoint(point);
+        }
+
+        foreach (float3 point in delta.removePosition)
+        {
+            RemovePoint(point);
+        }
     }
 }
