@@ -15,6 +15,8 @@ partial struct BoidCellMapUpdateDataSystem : ISystem
     public struct BoidCellMapUpdateTotal : IComponentData
     {
         public NativeHashMap<int3, CellDataMap> mapCellDatasTotal;
+        public NativeParallelMultiHashMap<int3, float3> mapCellDatasCurrentBoidPositionsTotal;
+        public NativeParallelMultiHashMap<int3, KdTreeNode> mapCellDatasNodeBoidPositionsTotal;
         public int count => mapCellDatasTotal.Count;
     }
     public struct CellDataMap
@@ -58,6 +60,7 @@ partial struct BoidCellMapUpdateDataSystem : ISystem
             foreach (Entity boidEntity in mapBoid.GetValuesForKey(key))
             {
                 RefRO<LocalTransform> boidLocalTransform = SystemAPI.GetComponentRO<LocalTransform>(boidEntity);
+                boidCellMapUpdateTotal.ValueRW.mapCellDatasCurrentBoidPositionsTotal.Add(key, boidLocalTransform.ValueRO.Position);
                 allCurrentBoidPositionsInCell.Add(boidLocalTransform.ValueRO.Position);
             }
 
@@ -99,6 +102,7 @@ partial struct BoidCellMapUpdateDataSystem : ISystem
             if (!uniqueKeys.Contains(key))
             {
                 CellDataMap data = mapCellDatasTotal[key];
+                boidCellMapUpdateTotal.ValueRW.mapCellDatasCurrentBoidPositionsTotal.Remove(key);
                 if (data.currentBoidPositions.IsCreated) data.currentBoidPositions.Dispose();
                 if (data.previousBoidPositions.IsCreated) data.previousBoidPositions.Dispose();
                 if (data.nodes.IsCreated) data.nodes.Dispose();

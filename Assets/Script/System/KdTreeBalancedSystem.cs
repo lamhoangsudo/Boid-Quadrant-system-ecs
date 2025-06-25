@@ -5,7 +5,7 @@ using Unity.Mathematics;
 using static BoidCellMapDataDivisionSystem;
 using static BoidCellMapUpdateDataSystem;
 [UpdateBefore(typeof(BoidCellMapDataDivisionSystem))]
-partial struct KdTreeSimpleSystem : ISystem
+partial struct KdTreeBalancedSystem : ISystem
 {
     private KdTreeTool kdTreeTool;
     [BurstCompile]
@@ -18,20 +18,19 @@ partial struct KdTreeSimpleSystem : ISystem
     public void OnUpdate(ref SystemState state)
     {
         RefRW<BoidCellMapUpdateTotal> boidCellMapUpdateTotal = SystemAPI.GetSingletonRW<BoidCellMapUpdateTotal>();
-        foreach ((RefRW<KDTreeMapContainer> KDTreeMapContainer, RefRO<SimpleKDTreeMap> simpleKDTreeMap) in SystemAPI.Query<RefRW<KDTreeMapContainer>, RefRO<SimpleKDTreeMap>>())
+        foreach ((RefRW<KDTreeMapContainer> KDTreeMapContainer, RefRO<BalancedKDTreeMap> balancedKDTreeMap) in SystemAPI.Query<RefRW<KDTreeMapContainer>, RefRO<BalancedKDTreeMap>>())
         {
             NativeHashMap<int3, CellDataMap> mapCellDatas = KDTreeMapContainer.ValueRO.map;
-            if(mapCellDatas.IsEmpty)
+            if (mapCellDatas.IsEmpty)
             {
                 return; // If the map is empty, no need to proceed
             }
             foreach (KVPair<int3, CellDataMap> mapCellData in mapCellDatas)
             {
                 // Initialize the KDTree for the cell 
-                if (mapCellData.Value.hasKDTree) continue;
                 kdTreeTool.BuildTree(mapCellData.Value.currentBoidPositions, Allocator.Temp);
                 mapCellData.Value.nodes = kdTreeTool.GetNodes(Allocator.Temp); // Assign the nodes to the cell data
-                foreach(KdTreeNode node in mapCellData.Value.nodes)
+                foreach (KdTreeNode node in mapCellData.Value.nodes)
                 {
                     boidCellMapUpdateTotal.ValueRW.mapCellDatasNodeBoidPositionsTotal.Add(mapCellData.Key, node);
                 }
@@ -44,6 +43,6 @@ partial struct KdTreeSimpleSystem : ISystem
     [BurstCompile]
     public void OnDestroy(ref SystemState state)
     {
-
+        
     }
 }

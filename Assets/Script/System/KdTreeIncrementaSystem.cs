@@ -4,7 +4,7 @@ using Unity.Entities;
 using Unity.Mathematics;
 using static BoidCellMapDataDivisionSystem;
 using static BoidCellMapUpdateDataSystem;
-
+[UpdateBefore(typeof(BoidCellMapDataDivisionSystem))]
 partial struct KdTreeIncrementaSystem : ISystem
 {
     private KdTreeTool kdTreeTool;
@@ -17,6 +17,7 @@ partial struct KdTreeIncrementaSystem : ISystem
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
+        RefRW<BoidCellMapUpdateTotal> boidCellMapUpdateTotal = SystemAPI.GetSingletonRW<BoidCellMapUpdateTotal>();
         foreach ((RefRW<KDTreeMapContainer> KDTreeMapContainer, RefRO<IncrementalKDTreeMap> incrementalKDTreeMap) in SystemAPI.Query<RefRW<KDTreeMapContainer>, RefRO<IncrementalKDTreeMap>>())
         {
             NativeHashMap<int3, CellDataMap> mapCellDatas = KDTreeMapContainer.ValueRO.map;
@@ -37,6 +38,10 @@ partial struct KdTreeIncrementaSystem : ISystem
                     // If the KDTree does not exist, build it from the current boid positions
                     kdTreeTool.BuildTree(mapCellData.Value.currentBoidPositions, Allocator.Temp);
                     mapCellData.Value.nodes = kdTreeTool.GetNodes(Allocator.Temp); // Assign the nodes to the cell data
+                    foreach (KdTreeNode node in mapCellData.Value.nodes)
+                    {
+                        boidCellMapUpdateTotal.ValueRW.mapCellDatasNodeBoidPositionsTotal.Add(mapCellData.Key, node);
+                    }
                     mapCellData.Value.hasKDTree = true; // Mark that the KDTree has been built for this cell
                 }
                 // DisposeNode of the KDTree after use

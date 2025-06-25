@@ -3,20 +3,24 @@ using Unity.Collections;
 using Unity.Entities;
 using Unity.Mathematics;
 using Unity.Transforms;
-[UpdateBefore(typeof(BoidHashingSystem))]
+using static BoidCellMapUpdateDataSystem;
+[UpdateBefore(typeof(KdTreeSimpleSystem))]
+[UpdateBefore(typeof(KdTreeBalancedSystem))]
+[UpdateBefore(typeof(KdTreeIncrementaSystem))]
 partial struct BoidCaculaterDirectionSystem : ISystem
 {
-    private NativeArray<int3> neighborOffsets;
+    private KdTreeTool kdTreeTool;
     [BurstCompile]
     public void OnCreate(ref SystemState state)
     {
-        GetNeighborOffSet();
+        kdTreeTool = new KdTreeTool();
     }
 
     [BurstCompile]
     public void OnUpdate(ref SystemState state)
     {
         BoidHashingSystem.BoidHashing boidHashing = SystemAPI.GetSingleton<BoidHashingSystem.BoidHashing>();
+        NativeParallelMultiHashMap<int3, KdTreeNode> mapCellNodeDatasTotal = SystemAPI.GetSingleton<BoidCellMapUpdateTotal>().mapCellDatasNodeBoidPositionsTotal;
         /*
         foreach ((RefRO<LocalTransform> localTransform, RefRW<Boid> boid, Entity currentBoidEntity) in SystemAPI.Query<RefRO<LocalTransform>, RefRW<Boid>>().WithEntityAccess())
         {
@@ -25,7 +29,7 @@ partial struct BoidCaculaterDirectionSystem : ISystem
             for (int i = 0; i < neighborOffsets.Length; i++)
             {
                 int3 cellBoidCurrentPosition = (int3)math.floor(localTransform.ValueRO.Position / boidHashing.cellSize) + neighborOffsets[i];
-                if (boidHashing.mapBoid.TryGetFirstValue(cellBoidCurrentPosition, out Entity neighborEntity, out NativeParallelMultiHashMapIterator<int3> iterator))
+                if (boidHashing.mapBoid.TryGetFirstValue(cellBoidCurrentPosition, out Entity neighborEntity, out NativeParallelMultiHashMapIterator<int3> iteratorNode))
                 {
                     do
                     {
@@ -45,7 +49,7 @@ partial struct BoidCaculaterDirectionSystem : ISystem
                             }
                             neighborCount++;
                         }
-                    } while (boidHashing.mapBoid.TryGetNextValue(out neighborEntity, ref iterator));
+                    } while (boidHashing.mapBoid.TryGetNextValue(out neighborEntity, ref iteratorNode));
                 }
             }
             float3 finalDir = float3.zero;
@@ -64,10 +68,11 @@ partial struct BoidCaculaterDirectionSystem : ISystem
             */
         BoidCaculaterDirectionJob boidCaculaterDirectionJob = new BoidCaculaterDirectionJob
         {
-            neighborOffsets = neighborOffsets,
             cellSize = boidHashing.cellSize,
             deltaTime = SystemAPI.Time.DeltaTime,
             mapBoid = boidHashing.mapBoid,
+            kdTreeTool = kdTreeTool,
+            mapCellNodeDatasTotal = mapCellNodeDatasTotal,
             neighborTransformLookUp = SystemAPI.GetComponentLookup<LocalTransform>(isReadOnly: true)
         };
         boidCaculaterDirectionJob.ScheduleParallel();
@@ -77,16 +82,17 @@ partial struct BoidCaculaterDirectionSystem : ISystem
     [BurstCompile]
     public void OnDestroy(ref SystemState state)
     {
-        neighborOffsets.Dispose();
+
     }
     [BurstCompile]
     public partial struct BoidCaculaterDirectionJob : IJobEntity
     {
-        [ReadOnly] public NativeArray<int3> neighborOffsets;
         public float cellSize;
         public float deltaTime;
         [ReadOnly] public NativeParallelMultiHashMap<int3, Entity> mapBoid;
         [ReadOnly] public ComponentLookup<LocalTransform> neighborTransformLookUp;
+        [ReadOnly] public KdTreeTool kdTreeTool;
+        [ReadOnly] public NativeParallelMultiHashMap<int3, KdTreeNode> mapCellNodeDatasTotal;
         public void Execute(in LocalTransform localTransform, ref Boid boid, Entity currentBoidEntity)
         {
             boid.changeDirectionTime -= deltaTime;
@@ -94,31 +100,42 @@ partial struct BoidCaculaterDirectionSystem : ISystem
             boid.changeDirectionTime = boid.changeDirectionTimeMax;
             int neighborCount = 0;
             float3 alignment = float3.zero, cohesion = float3.zero, separation = float3.zero;
-            for (int i = 0; i < neighborOffsets.Length; i++)
+            int3 cellBoidCurrentPosition = (int3)math.floor(localTransform.Position / cellSize);
+            kdTreeTool.nodes.Clear();
+            //if (mapCellNodeDatasTotal.TryGetFirstValue(cellBoidCurrentPosition, out KdTreeNode node, out var iteratorNode))
+            //{
+            //    do
+            //    {
+            //        kdTreeTool.nodes.Add(node);
+            //    }
+            //    while (mapCellNodeDatasTotal.TryGetNextValue(out node, ref iteratorNode));
+            //}
+            NativeList<float3> neighborPositions = kdTreeTool.Search(localTransform.Position, boid.neighborDistance, Allocator.TempJob);
+            if (mapBoid.TryGetFirstValue(cellBoidCurrentPosition, out Entity neighborEntity, out NativeParallelMultiHashMapIterator<int3> iterator))
             {
-                int3 cellBoidCurrentPosition = (int3)math.floor(localTransform.Position / cellSize) + neighborOffsets[i];
-                if (mapBoid.TryGetFirstValue(cellBoidCurrentPosition, out Entity neighborEntity, out NativeParallelMultiHashMapIterator<int3> iterator))
+                do
                 {
-                    do
+                    if (neighborEntity == currentBoidEntity) continue;
+                    RefRO<LocalTransform> neighborTransform = neighborTransformLookUp.GetRefRO(neighborEntity);
+                    float3 neighborPosition = neighborTransform.ValueRO.Position;
+                    if (neighborPositions.Contains(neighborPosition) == false)
                     {
-                        if (neighborEntity == currentBoidEntity) continue;
-                        RefRO<LocalTransform> neighborTransform = neighborTransformLookUp.GetRefRO(neighborEntity);
-                        float3 neighborPosition = neighborTransform.ValueRO.Position;
-                        float distance = math.distance(localTransform.Position, neighborPosition);
-                        if (distance <= boid.neighborDistance && distance > 0)
+                        continue; // Skip if the neighbor position is not in the kdTree search results
+                    }
+                    float distance = math.distance(localTransform.Position, neighborPosition);
+                    if (distance <= boid.neighborDistance && distance > 0)
+                    {
+                        float3 neighborDirection = neighborTransform.ValueRO.Forward();
+                        alignment += neighborDirection;
+                        cohesion += neighborPosition;
+                        if (distance < boid.separationDistance)
                         {
-                            float3 neighborDirection = neighborTransform.ValueRO.Forward();
-                            alignment += neighborDirection;
-                            cohesion += neighborPosition;
-                            if (distance < boid.separationDistance)
-                            {
-                                float3 separationDirection = (localTransform.Position - neighborPosition) / distance;
-                                separation += separationDirection;
-                            }
-                            neighborCount++;
+                            float3 separationDirection = (localTransform.Position - neighborPosition) / distance;
+                            separation += separationDirection;
                         }
-                    } while (mapBoid.TryGetNextValue(out neighborEntity, ref iterator));
-                }
+                        neighborCount++;
+                    }
+                } while (mapBoid.TryGetNextValue(out neighborEntity, ref iterator));
             }
             float3 finalDir = float3.zero;
             if (neighborCount > 0)
@@ -134,36 +151,5 @@ partial struct BoidCaculaterDirectionSystem : ISystem
             boid.separation = separation;
             boid.direction = finalDir;
         }
-    }
-    private void GetNeighborOffSet()
-    {
-        neighborOffsets = new NativeArray<int3>(27, Allocator.Persistent);
-        neighborOffsets[0] = new int3(-1, -1, -1);
-        neighborOffsets[1] = new int3(-1, -1, 0);
-        neighborOffsets[2] = new int3(-1, -1, 1);
-        neighborOffsets[3] = new int3(-1, 0, -1);
-        neighborOffsets[4] = new int3(-1, 0, 0);
-        neighborOffsets[5] = new int3(-1, 0, 1);
-        neighborOffsets[6] = new int3(-1, 1, -1);
-        neighborOffsets[7] = new int3(-1, 1, 0);
-        neighborOffsets[8] = new int3(-1, 1, 1);
-        neighborOffsets[9] = new int3(0, -1, -1);
-        neighborOffsets[10] = new int3(0, -1, 0);
-        neighborOffsets[11] = new int3(0, -1, 1);
-        neighborOffsets[12] = new int3(0, 0, -1);
-        neighborOffsets[13] = new int3(0, 0, 0);
-        neighborOffsets[14] = new int3(0, 0, 1);
-        neighborOffsets[15] = new int3(0, 1, -1);
-        neighborOffsets[16] = new int3(0, 1, 0);
-        neighborOffsets[17] = new int3(0, 1, 1);
-        neighborOffsets[18] = new int3(1, -1, -1);
-        neighborOffsets[19] = new int3(1, -1, 0);
-        neighborOffsets[20] = new int3(1, -1, 1);
-        neighborOffsets[21] = new int3(1, 0, -1);
-        neighborOffsets[22] = new int3(1, 0, 0);
-        neighborOffsets[23] = new int3(1, 0, 1);
-        neighborOffsets[24] = new int3(1, 1, -1);
-        neighborOffsets[25] = new int3(1, 1, 0);
-        neighborOffsets[26] = new int3(1, 1, 1);
     }
 }

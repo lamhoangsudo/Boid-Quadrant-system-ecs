@@ -26,9 +26,9 @@ public struct KdTreeTool
         public NativeList<float3> addPosition;
         public NativeList<float3> removePosition;
     }
-    private NativeList<KdTreeNode> nodes; // List of nodes in the KD-tree
+    public NativeList<KdTreeNode> nodes; // List of nodes in the KD-tree
     private NativeArray<int> indices; // Indices of previousPoints in the original array
-    private NativeList<float3> points; // Points in the KD-tree
+    public NativeList<float3> points; // Points in the KD-tree
     private KdTreeDelta delta; // Delta for changes in the KD-tree
     public void BuildTree(NativeArray<float3> points, Allocator allocator)
     {
@@ -242,6 +242,37 @@ public struct KdTreeTool
         foreach (float3 point in delta.removePosition)
         {
             RemovePoint(point);
+        }
+    }
+    public NativeList<float3> Search(float3 origin, float radius, Allocator allocator)
+    {
+        NativeList<float3> results = new(allocator);
+        RecursiveSearch(origin, radius, 0, 0, ref results);
+        return results;
+    }
+
+    private void RecursiveSearch(float3 origin, float radius, int currentIndex, int depth, ref NativeList<float3> results)
+    {
+        if (currentIndex < 0 || currentIndex >= nodes.Length) return;
+
+        KdTreeNode node = nodes[currentIndex];
+        float distance = math.distance(origin, node.position);
+        if (distance <= radius)
+        {
+            results.Add(node.position);
+        }
+
+        int axis = depth % 3;
+        float delta = origin[axis] - node.position[axis];
+
+        int first = delta < 0 ? node.leftChild : node.rightChild;
+        int second = delta < 0 ? node.rightChild : node.leftChild;
+
+        RecursiveSearch(origin, radius, first, depth + 1, ref results);
+
+        if (math.abs(delta) <= radius)
+        {
+            RecursiveSearch(origin, radius, second, depth + 1, ref results);
         }
     }
 }
